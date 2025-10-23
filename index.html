@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="A markdown editor with live hot-reloading preview, clicking to jump to source code, synchronised editor and previewer">
+    <title>Live Markdown</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            background-color: #24292e;
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        header h1 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+        }
+
+        button {
+            background-color: #0366d6;
+            color: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background-color: #0256c7;
+        }
+
+        button:active {
+            background-color: #024ea8;
+        }
+
+        #container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        #editor-pane {
+            flex: 1;
+            border-right: 1px solid #e1e4e8;
+            padding: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        #editor {
+            width: 100%;
+            min-height: 100%;
+        }
+
+        #preview-pane {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        #preview {
+            line-height: 1.6;
+            color: #24292e;
+        }
+
+        #preview .source-mapping-boundary {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            /* margin collapsing means that without overflow: hidden;, this wrapper div is only as big as the child excluding the margin. However the margin collapsed version of the page looks a little better? */
+        }
+
+        /* Markdown styling */
+        #preview h1, #preview h2, #preview h3, #preview h4, #preview h5, #preview h6 {
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+
+        #preview h1 { font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
+        #preview h2 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
+        #preview h3 { font-size: 1.25em; }
+        #preview h4 { font-size: 1em; }
+        #preview h5 { font-size: 0.875em; }
+        #preview h6 { font-size: 0.85em; color: #6a737d; }
+
+        #preview p {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+
+        #preview a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+
+        #preview a:hover {
+            text-decoration: underline;
+        }
+
+        #preview ul, #preview ol {
+            margin-top: 0;
+            margin-bottom: 16px;
+            padding-left: 2em;
+        }
+
+        #preview li + li {
+            margin-top: .25em;
+        }
+
+        #preview blockquote {
+            margin: 0 0 16px 0;
+            padding: 0 1em;
+            color: #6a737d;
+            border-left: 0.25em solid rgba(191, 197, 203, 0.5);
+        }
+
+        #preview code {
+            background-color: rgba(232, 233, 233, 0.5);
+            border-radius: 3px;
+            padding: 0.2em 0.4em;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+            font-size: 85%;
+        }
+
+        #preview pre {
+            background-color: rgba(237, 241, 245, 0.5);
+            border-radius: 6px;
+            padding: 16px;
+            margin-top: 0;
+            margin-bottom: 16px;
+            overflow: auto;
+        }
+
+        #preview pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        #preview table {
+            border-collapse: collapse;
+            margin-top: 0;
+            margin-bottom: 16px;
+            width: 100%;
+        }
+
+        #preview table th, #preview table td {
+            padding: 6px 13px;
+            border: 1px solid #dfe2e5;
+        }
+
+        #preview table th {
+            font-weight: 600;
+            background-color: rgba(237, 241, 245, 0.5);
+        }
+
+        #preview table tr:nth-child(2n) {
+            background-color: rgba(237, 241, 245, 0.5);
+        }
+
+        #preview img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        #preview hr {
+            height: 0.25em;
+            padding: 0;
+            margin: 24px 0;
+            background-color: rgba(195, 201, 209, 0.5);
+            border: 0;
+        }
+
+        #preview strong {
+            font-weight: 600;
+        }
+
+        #preview em {
+            font-style: italic;
+        }
+
+        /* Click highlighting animations */
+        @keyframes previewFlash {
+            0% {
+                background-color: rgba(255, 211, 61, 0);
+            }
+            10% {
+                background-color: rgba(255, 211, 61, 0.3);
+            }
+            40% {
+                background-color: rgba(255, 211, 61, 0.3);
+            }
+            100% {
+                background-color: rgba(255, 211, 61, 0);
+            }
+        }
+
+        .preview-flash {
+            animation: previewFlash 1s ease-out;
+        }
+
+        @keyframes editorFlash {
+            0% {
+                background-color: rgba(255, 211, 61, 0);
+            }
+            10% {
+                background-color: rgba(255, 211, 61, 0.6);
+            }
+            40% {
+                background-color: rgba(255, 211, 61, 0.6);
+            }
+            100% {
+                background-color: rgba(255, 211, 61, 0);
+            }
+        }
+
+        .editor-flash-line {
+            animation: editorFlash 1s ease-out;
+        }
+
+        /* Cursor styles for clickable elements */
+        #preview [data-source-start][data-source-end] {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Live Markdown</h1>
+        <div class="controls">
+            <button id="copy-btn">Copy Source</button>
+        </div>
+    </header>
+
+    <div id="container">
+        <div id="editor-pane">
+            <div id="editor"></div>
+        </div>
+        <div id="preview-pane">
+            <div id="preview"></div>
+        </div>
+    </div>
+
+    <!-- Load libraries from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@16.4.1/lib/marked.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked-token-position@2.0.0/lib/index.umd.js"></script>
+
+    <script type="module">
+        // Import Monaco Editor from CDN
+        import * as monaco from 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/+esm';
+
+        // Setup Monaco Environment to avoid web worker issues
+        self.MonacoEnvironment = {
+            getWorker(_, label) {
+                return new Proxy({}, { get: () => () => { } });
+            }
+        };
+
+        // Default markdown template
+        const defaultMarkdown = `# GitHub Flavored Markdown Demo
+
+## Headings
+
+# H1 Heading
+## H2 Heading
+### H3 Heading
+#### H4 Heading
+##### H5 Heading
+###### H6 Heading
+
+## Text Formatting
+
+**Bold text** and __also bold__
+
+*Italic text* and _also italic_
+
+~~Strikethrough text~~
+
+**_Bold and italic_** combined
+
+## Links and Images
+
+[Link to GitHub](https://github.com)
+
+[Link with title](https://github.com "GitHub Homepage")
+
+![Alt text for image](https://placehold.co/600x400?text=Hello+World)
+
+## Lists
+
+### Unordered List
+- Item 1
+- Item 2
+  - Nested item 2.1
+  - Nested item 2.2
+- Item 3
+
+### Ordered List
+1. First item
+2. Second item
+   1. Nested item 2.1
+   2. Nested item 2.2
+3. Third item
+
+### Task List
+- [x] Completed task
+- [ ] Incomplete task
+- [ ] Another task
+
+## Blockquotes
+
+> This is a blockquote.
+> It can span multiple lines.
+>
+> And include multiple paragraphs.
+
+## Code
+
+Inline \`code\` with backticks.
+
+### Code Blocks
+
+\`\`\`javascript
+function greet(name) {
+  console.log(\`Hello, \${name}!\`);
+  return true;
+}
+\`\`\`
+
+\`\`\`python
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+\`\`\`
+
+## Tables
+
+| Syntax | Description | Example |
+| ------ | ----------- | ------- |
+| Header | Title | H1, H2, H3 |
+| List | Bullet points | Ordered, Unordered |
+| Code | Monospace | \`inline\`, blocks |
+| **Bold** | *Italic* | ~~Strike~~ |
+
+### Table with Alignment
+
+| Left Aligned | Center Aligned | Right Aligned |
+| :----------- | :------------: | ------------: |
+| Left | Center | Right |
+| A | B | C |
+
+## Horizontal Rule
+
+---
+
+## Line Breaks
+
+First line with two spaces at end
+Second line starts here
+
+Or use a blank line between paragraphs.
+
+## Special Characters & HTML
+
+Automatic URL linking: https://www.example.com
+
+Escaping special characters: \\* \\_ \\# \\[ \\]
+
+HTML entities: &copy; &trade; &hearts;
+`;
+
+        const preview = document.getElementById('preview');
+        const copyBtn = document.getElementById('copy-btn');
+
+        // Track active highlights for cleanup
+        let activePreviewFlash = {
+            element: null,
+            timeoutId: null
+        };
+        let activeEditorFlash = {
+            decorationIds: [],
+            timeoutId: null
+        };
+
+        // Clear all active highlights
+        function clearAllHighlights() {
+            // Clear preview flash
+            if (activePreviewFlash.element) {
+                activePreviewFlash.element.classList.remove('preview-flash');
+                activePreviewFlash.element = null;
+            }
+            if (activePreviewFlash.timeoutId) {
+                clearTimeout(activePreviewFlash.timeoutId);
+                activePreviewFlash.timeoutId = null;
+            }
+
+            // Clear editor flash
+            if (activeEditorFlash.decorationIds.length > 0) {
+                activeEditorFlash.decorationIds = editor.deltaDecorations(activeEditorFlash.decorationIds, []);
+            }
+            if (activeEditorFlash.timeoutId) {
+                clearTimeout(activeEditorFlash.timeoutId);
+                activeEditorFlash.timeoutId = null;
+            }
+        }
+
+        // Create Monaco Editor instance
+        const editor = monaco.editor.create(document.getElementById('editor'), {
+            value: defaultMarkdown,
+            language: 'markdown',
+            fontSize: 14,
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            scrollbar: {
+                vertical: 'hidden',
+                horizontal: 'hidden'
+            },
+            overviewRulerLanes: 0,
+            wordWrap: 'on',
+            hover: { enabled: false },
+            quickSuggestions: false,
+            suggestOnTriggerCharacters: false,
+            folding: false,
+            occurrencesHighlight: false
+        });
+
+        // Update editor height dynamically based on content
+        function updateEditorHeight() {
+            const contentHeight = editor.getContentHeight();
+            document.getElementById('editor').style.height = contentHeight + 'px';
+            editor.layout();
+        }
+
+        // Set initial height
+        updateEditorHeight();
+
+        // Update height when content changes
+        editor.onDidContentSizeChange(() => {
+            updateEditorHeight();
+        });
+
+        // Configure marked with position tracking
+        const markedInstance = new marked.Marked();
+
+        // Use marked-token-position extension
+        markedInstance.use(markedTokenPosition());
+
+        // Alignment algorithm: maps output graphemes back to source byte ranges
+        function mapTextPositions(source, output, translate) {
+            const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+            const outputGraphemes = Array.from(segmenter.segment(output));
+
+            const result = [];
+            let sourceStartOffset = 0;
+
+            for (const graphemeData of outputGraphemes) {
+                const grapheme = graphemeData.segment;
+                let sourceEndOffset = sourceStartOffset + 1;
+                let bestMatch = null;
+
+                // Greedily find the longest substring of source that translates to this grapheme
+                // Keep searching through the entire remaining source until we find the longest match
+                while (sourceEndOffset <= source.length) {
+                    const candidate = source.substring(sourceStartOffset, sourceEndOffset);
+                    if (translate(candidate) === grapheme) {
+                        bestMatch = {
+                            grapheme: grapheme,
+                            startOffset: sourceStartOffset,
+                            endOffset: sourceEndOffset
+                        };
+                        // Keep looking for longer matches
+                        sourceEndOffset++;
+                    } else {
+                        // Even if this candidate doesn't match, keep trying longer substrings
+                        sourceEndOffset++;
+                    }
+                }
+
+                if (bestMatch) {
+                    result.push(bestMatch);
+                    sourceStartOffset = bestMatch.endOffset;
+                } else {
+                    // This should never happen if translate(source) === output
+                    throw new Error(`Alignment failed: could not find match for grapheme "${grapheme}"`);
+                }
+            }
+
+            // Verify that we consumed all of the source
+            if (sourceStartOffset !== source.length) {
+                throw new Error(`Alignment failed: source not fully consumed (${sourceStartOffset} / ${source.length})`);
+            }
+
+            return result;
+        }
+
+        // Wraps each grapheme in a span with source mapping data attributes
+        function wrapGraphemesInSpans(sourceMappings, tokenPosition, editor) {
+            const fragment = document.createDocumentFragment();
+            const model = editor.getModel();
+
+            for (const mapping of sourceMappings) {
+                const absoluteStartOffset = tokenPosition.start.offset + mapping.startOffset;
+                const absoluteEndOffset = tokenPosition.start.offset + mapping.endOffset;
+
+                const startPos = model.getPositionAt(absoluteStartOffset);
+                const endPos = model.getPositionAt(absoluteEndOffset);
+
+                const span = document.createElement('span');
+                span.className = 'source-mapping-boundary';
+                span.setAttribute('data-source-start', `${startPos.lineNumber}:${startPos.column}`);
+                span.setAttribute('data-source-end', `${endPos.lineNumber}:${endPos.column}`);
+                span.textContent = mapping.grapheme;
+
+                fragment.appendChild(span);
+            }
+
+            return fragment;
+        }
+
+        // Create a generic renderer wrapper that adds position data attributes
+        const originalRenderer = new marked.Renderer();
+        const wrapSourceMappingBoundaries = {};
+
+        // Get all renderer methods
+        const rendererMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(originalRenderer))
+            .filter(name => name !== 'constructor' && typeof originalRenderer[name] === 'function');
+
+        function isInline(htmlContent) {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = htmlContent;
+            const node  = tempDiv.firstChild;
+            if (node) {
+                const nodeType = node.nodeType;
+                if (nodeType == Node.ELEMENT_NODE) {
+                    document.body.appendChild(tempDiv);
+                    const inline = window.getComputedStyle(node).display.includes('inline');
+                    document.body.removeChild(tempDiv);
+                    return inline;
+                } else if (nodeType == Node.TEXT_NODE) {
+                    return true;
+                }
+            }
+            return true;
+        }
+
+        function getTextNodes(element) {
+            const walker = document.createTreeWalker(
+                element,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode: (node) => node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+                }
+            );
+            const nodes = [];
+            let current;
+            while (current = walker.nextNode()) {
+                nodes.push(current);
+            }
+            return nodes;
+        }
+
+        // Wrap each renderer method to add position attributes
+        rendererMethods.forEach(methodName => {
+            wrapSourceMappingBoundaries[methodName] = function(token, ...args) {
+                // Call original renderer
+                const htmlContent = originalRenderer[methodName].call(this, token, ...args);
+
+                if (token && token.position) {
+                    const startPosition = {
+                        lineNumber: token.position.start.line + 1,
+                        column: token.position.start.column + 1
+                    };
+                    const endPosition = {
+                        lineNumber: token.position.end.line + 1,
+                        column: token.position.end.column + 1
+                    };
+
+                    let boundary;
+                    if (isInline(htmlContent)) {
+                        boundary = document.createElement('span');
+                    } else {
+                        boundary = document.createElement('div');
+                    }
+                    boundary.innerHTML = htmlContent;
+                    const start = `${startPosition.lineNumber}:${startPosition.column}`;
+                    const end = `${endPosition.lineNumber}:${endPosition.column}`;
+                    boundary.setAttribute('data-source-start', start);
+                    boundary.setAttribute('data-source-end', end);
+                    boundary.classList.add('source-mapping-boundary');
+
+                    if (boundary.firstChild && boundary.firstChild.nodeType == Node.TEXT_NODE) {
+                        const node = boundary.firstChild;
+                        const translate = (text) => {
+                            const tempDiv = document.createElement('div');
+                            tempDiv.innerHTML = text;
+                            return tempDiv.firstChild.textContent;
+                        };
+                        const domText = node.textContent;
+
+                        // Align htmlContent with domText and wrap each grapheme in a span
+                        const sourceMappings = mapTextPositions(htmlContent, domText, translate);
+                        const fragment = wrapGraphemesInSpans(sourceMappings, token.position, editor);
+
+                        // Replace the text node with the fragment of wrapped spans
+                        node.replaceWith(fragment);
+                    }
+
+                    return boundary.outerHTML;
+                }
+
+                return htmlContent;
+            };
+        });
+
+        markedInstance.use({ renderer: wrapSourceMappingBoundaries });
+
+        markedInstance.setOptions({
+            headerIds: false,
+            mangle: false,
+            breaks: true,
+            gfm: true
+        });
+
+        // Mapping functions
+        function getSourceSpan(previewNode) {
+            if (!previewNode) return null;
+
+            // Walk up the DOM tree looking for position data
+            let element = previewNode;
+            const previewContainer = document.getElementById('preview');
+
+            while (element && element !== previewContainer) {
+                if (element.nodeType === Node.ELEMENT_NODE) {
+                    const startAttr = element.getAttribute('data-source-start');
+                    const endAttr = element.getAttribute('data-source-end');
+
+                    if (startAttr && endAttr) {
+                        const [startLine, startCol] = startAttr.split(':').map(Number);
+                        const [endLine, endCol] = endAttr.split(':').map(Number);
+
+                        const result = {
+                            startPosition: { lineNumber: startLine, column: startCol },
+                            endPosition: { lineNumber: endLine, column: endCol }
+                        };
+                        return result;
+                    }
+                }
+
+                element = element.parentNode;
+            }
+
+            return null;
+        }
+
+        function getPreviewNode(sourceLine, sourceCol) {
+            const walker = document.createTreeWalker(
+                preview,
+                NodeFilter.SHOW_ELEMENT,
+                {
+                    acceptNode: (node) => {
+                        if (node.hasAttribute('data-source-start') &&
+                            node.hasAttribute('data-source-end')) {
+                            return NodeFilter.FILTER_ACCEPT;
+                        }
+                        return NodeFilter.FILTER_SKIP;
+                    }
+                }
+            );
+
+            let deepestMatch = null;
+            let currentNode;
+
+            while (currentNode = walker.nextNode()) {
+                const span = getSourceSpan(currentNode);
+                if (!span) continue;
+
+                // Simple range check using >= and <=
+                const inRange = sourceLine >= span.startPosition.lineNumber &&
+                               sourceLine <= span.endPosition.lineNumber &&
+                               (sourceLine > span.startPosition.lineNumber || sourceCol >= span.startPosition.column) &&
+                               (sourceLine < span.endPosition.lineNumber || sourceCol <= span.endPosition.column);
+
+                if (inRange) {
+                    // Check if this is a block-level element (not inline)
+                    const display = window.getComputedStyle(currentNode).display;
+                    if (!display.includes('inline')) {
+                        deepestMatch = currentNode;
+                    }
+                    // Keep going - there might be deeper block-level matches
+                }
+                // No early exit - must check everything to handle lists/tables
+            }
+
+            return deepestMatch;
+        }
+
+        // Convert markdown to HTML
+        function updatePreview() {
+            const markdown = editor.getValue();
+            const html = markedInstance.parse(markdown);
+            preview.innerHTML = html;
+        }
+
+        // Bidirectional scroll synchronization
+        const editorPane = document.getElementById('editor-pane');
+        const previewPane = document.getElementById('preview-pane');
+
+        // Editor pane scrolls → sync preview
+        document.addEventListener('wheel', (e) => {
+            if (!editorPane.matches(':hover')) return;
+            e.stopPropagation(); // Prevent Monaco from interfering
+
+            if (!e.isTrusted) return; // Ignore programmatic scrolls
+            const editorMaxScroll = editorPane.scrollHeight - editorPane.clientHeight;
+            const previewMaxScroll = previewPane.scrollHeight - previewPane.clientHeight;
+            if (editorMaxScroll <= 0 || previewMaxScroll <= 0) {
+                return;
+            }
+            const proportionalScroll = e.deltaY * (previewMaxScroll / editorMaxScroll);
+            previewPane.scrollBy(0, Math.round(proportionalScroll));
+        }, { capture: true });
+
+        // Preview pane scrolls → sync editor
+        document.addEventListener('wheel', (e) => {
+            if (!previewPane.matches(':hover')) return;
+            e.stopPropagation(); // Prevent interference
+
+            if (!e.isTrusted) return; // Ignore programmatic scrolls
+            const editorMaxScroll = editorPane.scrollHeight - editorPane.clientHeight;
+            const previewMaxScroll = previewPane.scrollHeight - previewPane.clientHeight;
+            if (editorMaxScroll <= 0 || previewMaxScroll <= 0) {
+                return;
+            }
+            const proportionalScroll = e.deltaY * (editorMaxScroll / previewMaxScroll);
+            editorPane.scrollBy(0, Math.round(proportionalScroll));
+        }, { capture: true });
+
+        // Alignment functions for precise scrolling between editor and preview
+
+        /**
+         * Finds the line number element in the Monaco editor DOM.
+         * @param {number} lineNumber - The line number to find
+         * @returns {HTMLElement|null} The line number element or null if not found
+         */
+        function getLineNumberElement(lineNumber) {
+            const lineNumberElements = document.querySelectorAll('div.line-numbers');
+            for (const elem of lineNumberElements) {
+                if (elem.innerText === String(lineNumber)) {
+                    return elem;
+                }
+            }
+            return null;
+        }
+
+        /**
+         * Gets the viewport Y position of the center of an element.
+         * @param {HTMLElement} element - The element to measure
+         * @returns {number} The Y coordinate of the element's vertical center
+         */
+        function getElementViewportY(element) {
+            const rect = element.getBoundingClientRect();
+            return rect.top + rect.height / 2;
+        }
+
+        /**
+         * Filters out empty lines from a source span.
+         * @param {Object} sourceSpan - Source span with startPosition and endPosition
+         * @returns {Object} Filtered span with { startLineNumber, endLineNumber }
+         */
+        function getFilteredLineSpan(sourceSpan) {
+            let startLineNumber = sourceSpan.startPosition.lineNumber;
+            let endLineNumber = sourceSpan.endPosition.lineNumber;
+
+            // don't include empty lines in the span
+            if (sourceSpan.endPosition.column == 1 && endLineNumber > 1) {
+                endLineNumber--;
+            }
+            while (editor.getModel().getLineContent(startLineNumber) === '') {
+                startLineNumber++;
+            }
+            while (editor.getModel().getLineContent(endLineNumber) === '') {
+                endLineNumber--;
+            }
+
+            return { startLineNumber, endLineNumber };
+        }
+
+        /**
+         * Gets the viewport Y position of the center of a line span.
+         * @param {number} startLineNumber - The starting line number
+         * @param {number} endLineNumber - The ending line number
+         * @returns {number|null} The Y coordinate of the span's vertical center, or null if lines not found
+         */
+        function getLineSpanCenterY(sourceSpan) {
+            const { startLineNumber, endLineNumber } = getFilteredLineSpan(sourceSpan);
+
+            const startLineElement = getLineNumberElement(startLineNumber);
+            const endLineElement = getLineNumberElement(endLineNumber);
+
+            if (!startLineElement || !endLineElement) {
+                return null;
+            }
+
+            const startRect = startLineElement.getBoundingClientRect();
+            const endRect = endLineElement.getBoundingClientRect();
+
+            // Calculate center Y between top of first line and bottom of last line
+            const spanCenterY = startRect.top + (endRect.bottom - startRect.top) / 2;
+
+            return spanCenterY;
+        }
+
+        /**
+         * Aligns editor line span with preview node by scrolling the non-anchor pane.
+         * @param {Object} sourceSpan - Source span with startPosition and endPosition {lineNumber, column}
+         * @param {HTMLElement} previewNode - The preview element to align with
+         * @param {HTMLElement} anchor - The pane to keep fixed (previewPane or editorPane)
+         */
+        function alignPanes(sourceSpan, previewNode, anchorPane) {
+            // Get viewport Y positions
+            const lineSpanY = getLineSpanCenterY(sourceSpan);
+            const previewY = getElementViewportY(previewNode);
+
+            if (lineSpanY === null) {
+                console.error('Could not find line elements for alignment');
+                return;
+            }
+
+            const scrollingPane = anchorPane === previewPane ? editorPane : previewPane;
+            const scrollDelta = anchorPane === previewPane ? previewY - lineSpanY : lineSpanY - previewY;
+
+            const threshold = 1;
+            // Early exit if already aligned within threshold
+            if (Math.abs(scrollDelta) < threshold) {
+                return;
+            }
+
+            let scrollTarget = scrollingPane.scrollTop - scrollDelta;
+
+            const maxScroll = scrollingPane.scrollHeight - scrollingPane.clientHeight;
+            let anchorScrollBy = 0;
+
+            if (scrollTarget < 0) {
+                anchorScrollBy = 0 - scrollTarget;
+                scrollTarget = 0;
+            } else if (scrollTarget > maxScroll) {
+                anchorScrollBy = maxScroll - scrollTarget;
+                scrollTarget = maxScroll;
+            }
+
+            scrollingPane.scrollTo({
+                top: Math.round(scrollTarget),
+                behavior: 'smooth'
+            });
+
+            if (Math.abs(anchorScrollBy) >= threshold) {
+                anchorPane.scrollBy({
+                    top: Math.round(anchorScrollBy),
+                    behavior: 'smooth'
+                });
+            }
+        }
+
+        // Event listeners
+        editor.onDidChangeModelContent(() => {
+            updatePreview();
+        });
+
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(editor.getValue()).then(() => {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                }, 1000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        });
+
+        // Preview click handler - flash corresponding editor line
+        preview.addEventListener('click', (e) => {
+            const sourceSpan = getSourceSpan(e.target);
+            if (!sourceSpan) {
+                console.error('No source mapping found for this element', e.target);
+                return;
+            }
+
+            const range = document.createRange();
+            range.selectNodeContents(e.target);
+            const rect = range.getBoundingClientRect();
+            const isLeftHalf = e.clientX < rect.left + rect.width / 2;
+
+            let position;
+            if (isLeftHalf) {
+                position = sourceSpan.startPosition
+            } else {
+                if (e.target.lastChild && getSourceSpan(e.target.lastChild)) {
+                    position = getSourceSpan(e.target.lastChild).endPosition;
+                } else {
+                    position = sourceSpan.endPosition;
+                }
+            }
+
+            // Clear any existing highlights
+            clearAllHighlights();
+
+            // Add flash decoration to editor lines (filtered to exclude empty lines)
+            const { startLineNumber, endLineNumber } = getFilteredLineSpan(sourceSpan);
+
+            activeEditorFlash.decorationIds = editor.deltaDecorations([], [{
+                range: new monaco.Range(startLineNumber, 1, endLineNumber, 1),
+                options: {
+                    isWholeLine: true,
+                    className: 'editor-flash-line'
+                }
+            }]);
+
+            // Remove decoration after animation completes
+            activeEditorFlash.timeoutId = setTimeout(() => {
+                if (activeEditorFlash.decorationIds.length > 0) {
+                    activeEditorFlash.decorationIds = editor.deltaDecorations(activeEditorFlash.decorationIds, []);
+                    activeEditorFlash.timeoutId = null;
+                }
+            }, 1000);
+
+            editor.setPosition(position);
+            editor.focus();
+
+            // Align the full source span with the clicked preview element (preview is anchor)
+            alignPanes(sourceSpan, e.target, previewPane);
+        });
+
+        // Editor click handler - flash corresponding preview element
+        editor.onMouseDown((e) => {
+            const position = e.target.position;
+            if (!position) return;
+
+            const line = position.lineNumber;
+            const col = position.column;
+
+            const previewNode = getPreviewNode(line, col);
+            if (!previewNode) {
+                console.error(`No preview element found for position line ${line}, col ${col}`);
+                return;
+            }
+
+            const sourceSpan = getSourceSpan(previewNode);
+            if (sourceSpan) {
+                // Clear any existing highlights
+                clearAllHighlights();
+
+                // Add flash animation to preview element
+                previewNode.classList.add('preview-flash');
+                activePreviewFlash.element = previewNode;
+
+                // Remove the class after animation completes
+                activePreviewFlash.timeoutId = setTimeout(() => {
+                    if (activePreviewFlash.element === previewNode) {
+                        previewNode.classList.remove('preview-flash');
+                        activePreviewFlash.element = null;
+                        activePreviewFlash.timeoutId = null;
+                    }
+                }, 1000);
+
+                // Align preview node with the center of its full source span (editor is anchor)
+                alignPanes(sourceSpan, previewNode, editorPane);
+            }
+        });
+
+        // Initialize preview with default content
+        updatePreview();
+    </script>
+</body>
+</html>
