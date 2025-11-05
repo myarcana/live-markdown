@@ -255,6 +255,7 @@
     <header>
         <h1>Live Markdown</h1>
         <div class="controls">
+            <button id="copy-url-btn">Copy URL</button>
             <button id="copy-btn">Copy Source</button>
         </div>
     </header>
@@ -283,6 +284,13 @@
                 return new Proxy({}, { get: () => () => { } });
             }
         };
+
+        // Main async initialization
+        (async function() {
+
+        // Initialize brotli
+        const brotli = await import("https://unpkg.com/brotli-wasm@3.0.0/index.web.js?module").then(m => m.default);
+        console.log('Brotli initialized:', brotli);
 
         // Default markdown template
         const defaultMarkdown = `# GitHub Flavored Markdown Demo
@@ -398,6 +406,63 @@ Escaping special characters: \\* \\_ \\# \\[ \\]
 HTML entities: &copy; &trade; &hearts;
 `;
 
+        // Base64 URL-safe encoding/decoding utilities
+        function base64UrlEncode(uint8Array) {
+            let binary = String.fromCharCode(...uint8Array);
+            return btoa(binary)
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=+$/, '');
+        }
+
+        function base64UrlDecode(base64Url) {
+            base64Url = base64Url
+                .replace(/-/g, '+')
+                .replace(/_/g, '/');
+            // pad to multiple of 4
+            while (base64Url.length % 4) base64Url += '=';
+            let binary = atob(base64Url);
+            return Uint8Array.from(binary, c => c.charCodeAt(0));
+        }
+
+        // Compress and save markdown to URL hash
+        async function saveToHash(markdown) {
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(markdown);
+                const compressed = await brotli.compress(data);
+                const encoded = base64UrlEncode(compressed);
+                location.hash = encoded;
+            } catch (err) {
+                console.error('Failed to compress and save:', err);
+            }
+        }
+
+        // Load and decompress markdown from URL hash
+        async function loadFromHash() {
+            const hash = location.hash.slice(1); // Remove the '#'
+            if (!hash) {
+                console.log('No hash found in URL');
+                return null;
+            }
+
+            try {
+                console.log('Loading from hash:', hash);
+                const compressed = base64UrlDecode(hash);
+                console.log('Decoded to compressed bytes:', compressed.length);
+                const decompressed = await brotli.decompress(compressed);
+                console.log('Decompressed to bytes:', decompressed.length);
+                const decoder = new TextDecoder();
+                const text = decoder.decode(decompressed);
+                console.log('Decoded to text:', text.length, 'characters');
+                return text;
+            } catch (err) {
+                console.error('Failed to load and decompress hash:', err);
+                console.error('Hash value was:', hash);
+                return null;
+            }
+        }
+
         const preview = document.getElementById('preview');
         const copyBtn = document.getElementById('copy-btn');
 
@@ -433,9 +498,12 @@ HTML entities: &copy; &trade; &hearts;
             }
         }
 
+        // Load initial markdown (from hash or default)
+        const initialMarkdown = location.hash ? await loadFromHash() : defaultMarkdown;
+
         // Create Monaco Editor instance
         const editor = monaco.editor.create(document.getElementById('editor'), {
-            value: defaultMarkdown,
+            value: initialMarkdown,
             language: 'markdown',
             fontSize: 14,
             minimap: { enabled: false },
@@ -914,8 +982,15 @@ HTML entities: &copy; &trade; &hearts;
         }
 
         // Event listeners
+        let saveDebounceTimer = null;
         editor.onDidChangeModelContent(() => {
             updatePreview();
+
+            // Debounce hash updates to avoid excessive URL changes
+            clearTimeout(saveDebounceTimer);
+            saveDebounceTimer = setTimeout(() => {
+                saveToHash(editor.getValue());
+            }, 500);
         });
 
         copyBtn.addEventListener('click', () => {
@@ -928,6 +1003,40 @@ HTML entities: &copy; &trade; &hearts;
             }).catch(err => {
                 console.error('Failed to copy:', err);
             });
+        });
+
+        const copyUrlBtn = document.getElementById('copy-url-btn');
+        copyUrlBtn.addEventListener('click', async () => {
+            const originalText = copyUrlBtn.textContent;
+
+            try {
+                // Clear debounce timer and immediately save to ensure URL is up-to-date
+                clearTimeout(saveDebounceTimer);
+                copyUrlBtn.textContent = 'Generating...';
+                await saveToHash(editor.getValue());
+
+                const url = window.location.href;
+
+                // Try clipboard API
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(url);
+                    copyUrlBtn.textContent = 'Copied!';
+                } else {
+                    // Fallback: show prompt dialog
+                    prompt('Copy this URL:', url);
+                    copyUrlBtn.textContent = 'See prompt';
+                }
+
+                setTimeout(() => {
+                    copyUrlBtn.textContent = originalText;
+                }, 1000);
+            } catch (err) {
+                console.error('Failed to copy URL:', err);
+                copyUrlBtn.textContent = 'Failed';
+                setTimeout(() => {
+                    copyUrlBtn.textContent = originalText;
+                }, 2000);
+            }
         });
 
         // Preview click handler - flash corresponding editor line
@@ -1022,6 +1131,8 @@ HTML entities: &copy; &trade; &hearts;
 
         // Initialize preview with default content
         updatePreview();
+
+        })(); // End of async initialization
     </script>
 </body>
 </html>
