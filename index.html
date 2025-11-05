@@ -468,6 +468,29 @@ HTML entities: &copy; &trade; &hearts;
             updateEditorHeight();
         });
 
+        // Ensure cursor is always visible after position changes
+        editor.onDidChangeCursorPosition((e) => {
+            // Scroll editor pane if cursor not visible
+            const cursorTop = editor.getTopForLineNumber(e.position.lineNumber) - editor.getTopForLineNumber(1);
+            const viewportTop = editorPane.scrollTop;
+            const viewportBottom = viewportTop + editorPane.clientHeight;
+
+            if (cursorTop < viewportTop) {
+                editorPane.scrollTop = cursorTop;
+            } else if (cursorTop > viewportBottom) {
+                editorPane.scrollTop = cursorTop - editorPane.clientHeight + editor.getOption(monaco.editor.EditorOption.lineHeight);
+            }
+
+            // Sync preview pane
+            const previewNode = getPreviewNode(e.position.lineNumber, e.position.column);
+            if (previewNode) {
+                const sourceSpan = getSourceSpan(previewNode);
+                if (sourceSpan) {
+                    alignPanes(sourceSpan, previewNode, editorPane);
+                }
+            }
+        });
+
         // Configure marked with position tracking
         const markedInstance = new marked.Marked();
 
